@@ -1,0 +1,67 @@
+# Unique name for this workflow
+name: 2 - INTG - Deploy PR
+
+# Definition when the workflow should run
+on:
+    push:
+      branches: [ intg ]
+      paths:
+        - 'force-app/**'
+
+# Jobs to be execute
+jobs:
+    Deploy-on-sfdc:
+        runs-on: ubuntu-latest
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        steps:
+            # Now we install Nodejs in the VM, on latest version
+            - uses: actions/setup-node@v4
+              with:
+                node-version: 'latest'
+
+            # Checkout the source code
+            - name: 'Checkout source code'
+              uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
+
+            # Install Salesforce CLI
+            - name: 'Install Salesforce CLI'
+              run: |
+                  wget https://developer.salesforce.com/media/salesforce-cli/sf/channels/stable/sf-linux-x64.tar.xz
+                  mkdir ~/sf
+                  tar xJf sf-linux-x64.tar.xz -C ~/sf --strip-components 1
+                  echo "$HOME/sf/bin" >> $GITHUB_PATH
+                  ~/sf/bin/sf version
+
+            # install SFDX-Git-Delta plugin - https://github.com/scolladon/sfdx-git-delta
+            - name: 'Installing sf git delta'
+              run: |
+                  echo y | sf plugins install sfdx-git-delta
+                  sf plugins
+
+            - name: 'Create delta packages for new, modified or deleted metadata'
+              run: |
+                  mkdir changed-sources
+                  sf sgd:source:delta --to "HEAD" --from "HEAD^" --output changed-sources/ --generate-delta --source force-app/
+            
+            # The URL is stored in the Github Secret
+            # so here we store the URL into a text file
+            - name: 'Populate auth file with Github secret of the org'
+              shell: bash
+              run: echo ${{ secrets.SF_INTG_URL}} > ./SF_URL.txt
+
+            # Authenticate to org
+            - name: 'Authenticate to sfdc Org'
+              run: sf org login sfdx-url --sfdx-url-file ./SF_URL.txt --set-default --alias SFORG
+
+            - name: 'Deploy Delta Changes to sfdc org'
+              run: |
+                cat changed-sources/package/package.xml
+                sf project deploy start --source-dir "changed-sources/force-app" --test-level NoTestRun --json
+
+            - name: 'Deploy destructive changes (if any) to sfdc org'
+              run: |
+                  echo "--- destructiveChanges.xml generated with deleted metadata ---"
+                  cat changed-sources/destructiveChanges/package.xml
+                  cat changed-sources/destructiveChanges/destructiveChanges.xml
