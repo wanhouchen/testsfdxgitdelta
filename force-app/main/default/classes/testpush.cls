@@ -1,5 +1,5 @@
 public with sharing class testpush {
     public testpush() {
-        system.debug('testpush constructor');
+        system.debug('testpush constructor1');
     }
 }
